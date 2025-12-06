@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Push-up Tracker</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div id="app-container">
+        <h1>Push-up Challenge</h1>
+
+        <!-- Login/Signup View -->
+        <div id="auth-container">
+            <h2>Login / Sign Up</h2>
+            <input type="text" id="signup-name" placeholder="Your Name (for signup)">
+            <input type="email" id="auth-email" placeholder="Email" required>
+            <input type="password" id="auth-password" placeholder="Password" required>
+            <button id="login-btn">Login</button>
+            <button id="signup-btn">Sign Up</button>
+            <p id="auth-error" class="error"></p>
+        </div>
+
+        <!-- Main App View (Visible after login) -->
+        <div id="main-app" class="hidden">
+            <div id="welcome-message"></div>
+            <button id="logout-btn">Logout</button>
+
+            <!-- Submission Section -->
+            <div class="card">
+                <h2>Submit Push-ups</h2>
+                <label for="pushup-date">Date:</label>
+                <input type="date" id="pushup-date" style="margin-bottom: 10px;">
+                <input type="number" id="pushup-count" placeholder="Enter count" min="0" style="margin-top: 10px;">
+                <button id="submit-btn">Submit</button>
+                <p id="submit-status"></p>
+            </div>
+
+            <!-- Summary Section -->
+            <div class="card">
+                <h2>Daily Summary</h2>
+                <div id="summary-table-container">
+                    <!-- Summary table will be generated here by JavaScript -->
+                </div>
+            </div>
+
+            <!-- AI Coach Section -->
+            <div class="card" id="ai-coach-card">
+                <h2>🤖 AI Coach Feedback</h2>
+                <div id="ai-coach-feedback">
+                    <p>Analyzing your performance...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <!-- Your App's JavaScript -->
+    <script src="app.js"></script>
+</body>
+
+</html>
