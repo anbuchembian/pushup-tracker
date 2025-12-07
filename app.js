@@ -96,6 +96,12 @@ function setupApp() {
     // Change "2023" to a different year if needed.
     const decemberMonth = "2025-12";
     renderSummary(decemberMonth);
+
+    // Update global stats (Streak, Total, Average)
+    const user = firebase.auth().currentUser;
+    if (user) {
+        updateGlobalStats(user.uid);
+    }
 }
 
 // Submit push-ups
@@ -146,12 +152,84 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
         document.getElementById('pushup-count').value = '';
         // Re-render summary to show new data
         renderSummary("2025-12");
+        updateGlobalStats(user.uid);
     } catch (error) {
         console.error("Error submitting pushups: ", error);
         submitStatus.textContent = 'Error submitting. Please try again.';
         submitStatus.className = 'error';
     }
 });
+
+
+// --- 5.1. GLOBAL STATS LOGIC ---
+async function updateGlobalStats(userId) {
+    try {
+        const snapshot = await db.collection('pushups')
+            .where('userId', '==', userId)
+            .get();
+
+        const dates = [];
+        let totalPushups = 0;
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            dates.push(data.date);
+            totalPushups += (data.count || 0);
+        });
+
+        // 1. Total Push-ups
+        document.getElementById('stat-total').textContent = totalPushups.toLocaleString();
+
+        // 2. Daily Average (active days)
+        const uniqueDays = new Set(dates).size;
+        const average = uniqueDays > 0 ? Math.round(totalPushups / uniqueDays) : 0;
+        document.getElementById('stat-average').textContent = average;
+
+        // 3. Current Streak
+        // Sort unique dates descending
+        const sortedDates = [...new Set(dates)].sort().reverse();
+
+        let streak = 0;
+        if (sortedDates.length > 0) {
+            const today = new Date().toISOString().split('T')[0];
+            const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+            // If the most recent entry is today or yesterday, the streak is alive
+            if (sortedDates[0] === today || sortedDates[0] === yesterday) {
+                streak = 1;
+                // Check consecutive days backwards
+                // Convert to Date objects for easier math
+                let currentDate = new Date(sortedDates[0]);
+
+                for (let i = 1; i < sortedDates.length; i++) {
+                    const prevDate = new Date(sortedDates[i]);
+                    const diffTime = Math.abs(currentDate - prevDate);
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                    if (diffDays === 1) {
+                        streak++;
+                        currentDate = prevDate;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        const streakEl = document.getElementById('stat-streak');
+        streakEl.textContent = streak;
+
+        // Visual flair for streak
+        if (streak > 2) {
+            streakEl.parentElement.classList.add('fire');
+        } else {
+            streakEl.parentElement.classList.remove('fire');
+        }
+
+    } catch (error) {
+        console.error("Error updating stats:", error);
+    }
+}
 
 
 // --- 6. SUMMARY TABLE LOGIC ---
@@ -218,13 +296,15 @@ async function renderSummary(yearMonth) { // e.g., "2023-12"
     }
 }
 
-// --- 7. AI COACH LOGIC ---
-function updateAICoach(pushupData, userId, yearMonth) {
+// --- 7. AI COACH LOGIC (POWERED BY GEMINI) ---
+// ⚠️ IMPORTANT: Replace this with your actual Gemini API Key from https://aistudio.google.com/
+const GEMINI_API_KEY = "AIzaSyBIaLf68QiqHUaV3kD9RllYA-z4wvwA8Tg";
+
+async function updateAICoach(pushupData, userId, yearMonth) {
     const feedbackContainer = document.getElementById('ai-coach-feedback');
     const userPushups = pushupData[userId] || {};
 
-    // Convert data to array of objects for easier processing
-    // [{ date: '2023-12-01', count: 20 }, ...] sorted by date
+    // Convert data to array of objects
     const entries = Object.keys(userPushups).sort().map(date => ({
         date: date,
         count: userPushups[date]
@@ -236,86 +316,85 @@ function updateAICoach(pushupData, userId, yearMonth) {
         return;
     }
 
-    // Calculate metrics
+    // Check if API key is set
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY_HERE") {
+        feedbackContainer.innerHTML = `<p style="color: #d9534f;"><strong>⚠️ API Key Missing:</strong><br>
+        To enable the AI Coach, please open <code>app.js</code> and replace <code>YOUR_GEMINI_API_KEY_HERE</code> with a valid Gemini API key.</p>`;
+        return;
+    }
+
+    feedbackContainer.innerHTML = `<p>🤖 Analyzing your performance... <span class="loading-dots"></span></p>`;
+
+    // Prepare data for the LLM
     const totalPushups = entries.reduce((sum, entry) => sum + entry.count, 0);
     const activeDays = entries.length;
     const average = Math.round(totalPushups / activeDays);
+    const historyStr = entries.map(e => `${e.date}: ${e.count}`).join('\n');
 
-    // Calculate Streak
-    let streak = 0;
-    const today = new Date().toISOString().split('T')[0];
-    // Check backwards from today (or the last entry date if we want to be lenient, but strict streak means relative to today)
-    // Let's be lenient: streak is consecutive days ending at the last recorded entry, 
-    // AND that last entry must be today or yesterday to be "current".
+    const prompt = `
+    You are an enthusiastic and motivating fitness coach. 
+    Analyze the following push-up data for the user for the month of ${yearMonth}.
+    
+    Data:
+    ${historyStr}
+    
+    Summary:
+    - Total Push-ups: ${totalPushups}
+    - Active Days: ${activeDays}
+    - Average per active day: ${average}
+    
+    Please provide:
+    1. A brief analysis of their trend (are they consistent? improving?).
+    2. A specific, encouraging compliment.
+    3. Constructive advice for next week.
+    4. A short, funny "tough love" comment.
+    
+    Keep the response concise (under 100 words) and use emojis. Format with bolding where applicable.
+    `;
 
-    const lastEntryDate = entries[entries.length - 1].date;
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [{ text: prompt }]
+                }]
+            })
+        });
 
-    let isStreakActive = (lastEntryDate === today || lastEntryDate === yesterday);
+        const data = await response.json();
 
-    if (isStreakActive) {
-        streak = 1;
-        for (let i = entries.length - 2; i >= 0; i--) {
-            const curr = new Date(entries[i + 1].date);
-            const prev = new Date(entries[i].date);
-            const diffTime = Math.abs(curr - prev);
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        if (data.error) {
+            throw new Error(data.error.message);
+        }
 
-            if (diffDays === 1) {
-                streak++;
-            } else {
-                break;
-            }
+        const aiText = data.candidates[0].content.parts[0].text;
+        feedbackContainer.innerHTML = parseMarkdown(aiText);
+
+    } catch (error) {
+        console.error("Error fetching AI feedback:", error);
+
+        // Try to list models to debug
+        try {
+            const modelsResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+            const modelsData = await modelsResponse.json();
+            const availableModels = modelsData.models ? modelsData.models.map(m => m.name).join(', ') : "No models found";
+
+            feedbackContainer.innerHTML = `<p class="error"><strong>Error:</strong> ${error.message}<br><br><strong>Available Models:</strong><br>${availableModels}</p>`;
+        } catch (listError) {
+            feedbackContainer.innerHTML = `<p class="error">Oops! My brain is tired. (Error: ${error.message})<br>Could not list models: ${listError.message}</p>`;
         }
     }
+}
 
-    // Determine Trend (Last 3 entries vs Previous 3)
-    let trendMessage = "";
-    if (entries.length >= 6) {
-        const recent = entries.slice(-3).reduce((sum, e) => sum + e.count, 0) / 3;
-        const previous = entries.slice(-6, -3).reduce((sum, e) => sum + e.count, 0) / 3;
-
-        if (recent > previous * 1.1) {
-            trendMessage = "📈 You're getting stronger! Your recent average is higher than before.";
-        } else if (recent < previous * 0.9) {
-            trendMessage = "📉 A slight dip recently. Focus on consistency over intensity right now.";
-        } else {
-            trendMessage = "➡️ You're maintaining a steady pace. Consistency builds habit!";
-        }
-    } else if (entries.length >= 3) {
-        trendMessage = "📊 Keep logging data to see detailed trends!";
-    }
-
-    // Generate Feedback
-    let feedbackHTML = `
-        <div class="coach-stats">
-            <span><strong>Total:</strong> ${totalPushups}</span>
-            <span><strong>Avg/Day:</strong> ${average}</span>
-            <span><strong>Streak:</strong> ${streak} days 🔥</span>
-        </div>
-        <p class="coach-message">`;
-
-    if (streak >= 3) {
-        feedbackHTML += `You're on fire! ${streak} days in a row. Don't break the chain! ⛓️<br>`;
-    } else if (streak === 0) {
-        feedbackHTML += `Let's get back on track! A push-up a day keeps the weakness away. 💪<br>`;
-    }
-
-    if (trendMessage) {
-        feedbackHTML += `${trendMessage}<br>`;
-    }
-
-    // Random tip
-    const tips = [
-        "Remember to keep your back straight and core engaged.",
-        "Quality over quantity! Full range of motion yields better results.",
-        "Breathe in on the way down, breathe out on the way up.",
-        "Rest days are important too, but active recovery is better.",
-        "Try varying your hand width to target different muscles."
-    ];
-    const randomTip = tips[Math.floor(Math.random() * tips.length)];
-
-    feedbackHTML += `<br><strong>💡 Coach's Tip:</strong> ${randomTip}</p>`;
-
-    feedbackContainer.innerHTML = feedbackHTML;
+// Simple Markdown Parser for bolding and newlines
+function parseMarkdown(text) {
+    let html = text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')             // Italic
+        .replace(/\n/g, '<br>');                           // Newlines
+    return `<p class="coach-message">${html}</p>`;
 }
